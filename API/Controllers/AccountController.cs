@@ -5,6 +5,7 @@ using API.Data;
 using API.DTO;
 using API.Entities;
 using API.Intefaces;
+using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,8 +14,10 @@ public class AccountController : BaseApiController
 {
     private readonly DataContext _context;
     private readonly ITokenService _tokenService;
-    public AccountController(DataContext context, ITokenService tokenService)
+    private readonly IMapper _mapper;
+    public AccountController(DataContext context, ITokenService tokenService, IMapper mapper)
     {
+        _mapper = mapper;
         _tokenService = tokenService;
         _context = context;
 
@@ -25,19 +28,19 @@ public class AccountController : BaseApiController
     {
         if (await UserExists(register.Username)) return BadRequest("Username is taken");
 
+        var user = _mapper.Map<AppUser>(register);
+
         using var hmac = new HMACSHA512();
-        var user = new AppUser
-        {
-            UserName = register.Username.ToLower(),
-            PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(register.Password)),
-            PasswordSalt = hmac.Key
-        };
+        user.UserName = register.Username.ToLower();
+        user.PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(register.Password));
+        user.PasswordSalt = hmac.Key;
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
         return new UserDto
         {
             Username = user.UserName,
-            Token = _tokenService.CreateToken(user)
+            Token = _tokenService.CreateToken(user),
+            KnownAs = user.KnownAs
         };
     }
 
@@ -50,7 +53,7 @@ public class AccountController : BaseApiController
     public async Task<ActionResult<UserDto>> Login(LoginDto login)
     {
         var user = await _context.Users
-        .Include(p=> p.Photos)
+        .Include(p => p.Photos)
         .SingleOrDefaultAsync(match => match.UserName == login.Username);
 
         if (user == null) return Unauthorized("Invalid Username or Password1.");
@@ -65,7 +68,8 @@ public class AccountController : BaseApiController
         {
             Username = user.UserName,
             Token = _tokenService.CreateToken(user),
-            PhotoUrl = user.Photos.FirstOrDefault(x=> x.IsMain)?.Url
+            PhotoUrl = user.Photos.FirstOrDefault(x => x.IsMain)?.Url,
+            KnownAs = user.KnownAs
         };
 
     }
